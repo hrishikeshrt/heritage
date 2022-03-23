@@ -5,8 +5,8 @@ Heritage.py
 .. image:: https://img.shields.io/pypi/v/heritage
         :target: https://pypi.python.org/pypi/heritage
 
-.. image:: https://readthedocs.org/projects/heritage/badge/?version=latest
-        :target: https://heritage.readthedocs.io/en/latest/?version=latest
+.. image:: https://readthedocs.org/projects/heritage-py/badge/?version=latest
+        :target: https://heritage-py.readthedocs.io/en/latest/?version=latest
         :alt: Documentation Status
 
 .. image:: https://img.shields.io/pypi/pyversions/heritage
@@ -31,7 +31,7 @@ Heritage.py is a python interface to `The Sanskrit Heritage Site`_.
 .. _`The Sanskrit Heritage Site`: https://sanskrit.inria.fr/index.en.html
 
 * Free software: GNU General Public License v3
-* Documentation: https://heritage.readthedocs.io.
+* Documentation: https://heritage-py.readthedocs.io.
 
 
 Features
