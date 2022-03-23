@@ -6,7 +6,7 @@ Heritage.py -- Python Interface to The Sanskrit Heritage Platform
 
 __author__ = """Hrishikesh Terdalkar"""
 __email__ = 'hrishikeshrt@linuxmail.org'
-__version__ = '0.1.0'
+__version__ = '0.1.1'
 __created_on__ = 'Fri Jan  1 11:18:04 2021'
 
 ###############################################################################
