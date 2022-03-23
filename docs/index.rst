@@ -4,9 +4,6 @@ Welcome to Heritage.py's documentation!
 .. image:: https://img.shields.io/pypi/v/heritage
         :target: https://pypi.python.org/pypi/heritage
 
-.. image:: https://img.shields.io/travis/hrishikeshrt/heritage.svg
-        :target: https://travis-ci.com/hrishikeshrt/heritage
-
 .. image:: https://readthedocs.org/projects/heritage/badge/?version=latest
         :target: https://heritage.readthedocs.io/en/latest/?version=latest
         :alt: Documentation Status
