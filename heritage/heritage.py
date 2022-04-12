@@ -651,7 +651,13 @@ class HeritagePlatform:
 
     # ----------------------------------------------------------------------- #
 
-    def get_declensions(self, word, gender, headers=True, lexicon=None):
+    def get_declensions(
+        self,
+        word: str,
+        gender: str,
+        headers: bool = True,
+        lexicon: str = None
+    ):
         options = {
             'lex': self.get_lexicon(),
             't': self.get_option('t'),
@@ -666,7 +672,7 @@ class HeritagePlatform:
 
     # ----------------------------------------------------------------------- #
 
-    def get_conjugations(self, word, gana, lexicon=None):
+    def get_conjugations(self, word: str, gana: str, lexicon: str = None):
         options = {
             'lex': self.get_lexicon(),
             't': self.get_option('t'),
@@ -682,7 +688,7 @@ class HeritagePlatform:
 
     # ----------------------------------------------------------------------- #
 
-    def search_lexicon(self, word, lexicon=None):
+    def search_lexicon(self, word: str, lexicon: str = None):
         """
         Search a word in the dictionary
 
@@ -943,7 +949,7 @@ class HeritagePlatform:
 
         opt_name = opt_name.lower()
         if opt_name not in self.OPTIONS:
-            self.logger.warning("Invalid option: '{opt_name}'")
+            self.logger.warning(f"Invalid option: '{opt_name}'")
             return False
 
         if opt_value in self.OPTIONS[opt_name]['values']:
