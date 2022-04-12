@@ -15,9 +15,9 @@ from . import HeritagePlatform
 
 def main():
     """Console script for Heritage.py"""
-    home_dir = os.path.expanduser('~')
+    home_dir = os.path.expanduser("~")
     heritage_dir = os.path.join(
-        home_dir, 'git', 'heritage', 'Heritage_Platform'
+        home_dir, "git", "heritage", "Heritage_Platform"
     )
     SH = HeritagePlatform(heritage_dir)  # noqa
 
@@ -27,8 +27,7 @@ def main():
     args = parser.parse_args()
 
     print("Arguments: " + str(args._))
-    print("Replace this message by putting your code into "
-          "heritage.cli.main")
+    print("Replace this message by putting your code into heritage.cli.main")
     return 0
 
 
