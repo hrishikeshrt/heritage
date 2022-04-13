@@ -38,7 +38,7 @@ import urllib.parse
 from dataclasses import dataclass, field
 
 import requests
-from bs4 import BeautifulSoup
+import bs4
 
 from .constants import HERITAGE_COLOURS
 from .utils import build_query_string, devanagari_to_velthuis
@@ -121,18 +121,18 @@ class HeritageOutput:
 
     CLASSES = {"footer": ["enpied"]}
 
-    def __init__(self, html):
+    def __init__(self, html: str):
         self.logger = logging.getLogger(__name__)
         self.html = html
-        self.soup = BeautifulSoup(html, "html.parser")
+        self.soup = bs4.BeautifulSoup(html, "html.parser")
         self.process()
 
-    def process(self, html=None):
+    def process(self, html: str = None):
         """Process the html and extract basic information"""
         # Allow re-using of the class
         if html is not None:
             self.html = html
-            self.soup = BeautifulSoup(html, "html.parser")
+            self.soup = bs4.BeautifulSoup(html, "html.parser")
 
         self.body = self.soup.find("body")
         self.footer = self.body.find("div", class_=self.CLASSES["footer"])
@@ -152,7 +152,7 @@ class HeritageOutput:
         # Find Relevant Body Children
         self.blocks = self.body.find_all()
 
-    def extract_analysis(self, meta=False):
+    def extract_analysis(self, meta: bool = False):
         """
         Extract analysis from HTML
 
@@ -178,7 +178,7 @@ class HeritageOutput:
 
             solution = {}
 
-            soup = BeautifulSoup(block, "html.parser")
+            soup = bs4.BeautifulSoup(block, "html.parser")
             first_span = soup.find("span")
             solution_id = int(first_span.text.split()[1])
 
@@ -246,7 +246,7 @@ class HeritageOutput:
             roles.append({"text": word_text, "roles": word_roles})
         return roles
 
-    def extract_declensions(self, headers=True):
+    def extract_declensions(self, headers: bool = True):
         """Extract declensions from HTML"""
         if self.title.text != "Sanskrit Grammarian Declension Engine":
             self.logger.error("Invalid output page.")
@@ -262,7 +262,7 @@ class HeritageOutput:
             output = [row[1:] for row in output[1:]]
         return output
 
-    def extract_conjugations(self, headers=True):
+    def extract_conjugations(self, headers: bool = True):
         """Extract conjugations from HTML"""
         if self.title.text != "Sanskrit Grammarian Conjugation Engine":
             self.logger.error("Invalid output page.")
@@ -297,7 +297,7 @@ class HeritageOutput:
             if match:
                 return match.group(3)
 
-    def extract_lexicon_entry(self, word_id):
+    def extract_lexicon_entry(self, word_id: str):
         """Extract entry from a lexicon"""
         if "Monier-Williams Sanskrit-English" not in self.title.text:
             self.logger.error("Invalid dictionary page.")
@@ -307,7 +307,7 @@ class HeritageOutput:
         # TODO: complete
 
     @staticmethod
-    def parse_analysis(table):
+    def parse_analysis(table: bs4.element.Tag):
         """
         Parse analysis of a single word
         Analysis Format is: [root]{analysis_1 | analysis_2 | ..}
@@ -399,8 +399,15 @@ class HeritagePlatform:
     }
 
     METHODS = ["shell", "web"]
+    DEFAULT_METHOD = "shell"
 
-    def __init__(self, base_dir="", base_url=None, method="shell", **kwargs):
+    def __init__(
+        self,
+        base_dir: str = "",
+        base_url: str = None,
+        method: str = "shell",
+        **kwargs,
+    ):
         """
         Initialize Heritage Class
 
@@ -443,19 +450,35 @@ class HeritagePlatform:
     # Utilities (Actions)
 
     def get_analysis(
-        self, input_text, sentence=True, unsandhied=False, meta=False
+        self,
+        input_text: str,
+        sentence: bool = True,
+        unsandhied: bool = False,
+        meta: bool = False,
     ):
         """
-        Utility to obtain morphological analyses using Reader Companion
+        Obtain morphological analyses using The Sanskrit Reader Companion
 
         Parameters
         ----------
+        input_text : str
+            Input text to analyse
+        sentence : bool, optional
+            The input is treated as a sentence, if true, otherwise as a word.
+            The default is True.
+        unsandhied : bool, optional
+            If True, the input text is assumed to not contain sandhi.
+            The default is False.
+        meta : bool, optional
+            The option is passed to HeritageOutput.extract_analysis().
+            The default is False.
 
         Returns
         -------
-        result : list
-            List of valid morphological analyses
+        dict
+            Dictionary of valid morphological analyses with solution_id as keys
         """
+
         opt_st = "t" if sentence else "f"
         opt_us = "t" if unsandhied else "f"
 
@@ -489,17 +512,37 @@ class HeritagePlatform:
     # ----------------------------------------------------------------------- #
 
     def get_parse(
-        self, input_text, solution_id=None, sentence=True, unsandhied=False
+        self,
+        input_text: str,
+        solution_id: int = None,
+        sentence: bool = True,
+        unsandhied: bool = False,
     ):
         """
-        Utility to obtain morphological analyses using Reader Companion
+        Obtain parse of a sentence using The Sanskrit Reader Companion
+
+        Parameters
+        ----------
+        input_text : str
+            Input text to analyse
+        solution_id : int, optional
+            Solution ID to parse.
+            If None, the first solution ID is used.
+            The default is None.
+        sentence : bool, optional
+            The input is treated as a sentence, if true, otherwise as a word.
+            The option is passed to HeritagePlatform.get_analysis().
+            The default is True.
+        unsandhied : bool, optional
+            If True, the input text is assumed to not contain sandhi.
+            The option is passed to HeritagePlatform.get_analysis().
+            The default is False.
 
         Returns
         -------
-        result : list
-            List of valid morphological analyses
+        dict
+            Parse of the sentence
         """
-
         solutions = self.get_analysis(
             input_text, sentence=sentence, unsandhied=unsandhied, meta=True
         )
@@ -509,7 +552,7 @@ class HeritagePlatform:
             if not solutions:
                 return None  # TODO: Change this to something ?
 
-        solution_id = next(iter(solutions))
+            solution_id = next(iter(solutions))
 
         # No need to manually give options again, since it does it for us
         # Internally parser is a re-run of reader until a specific solution
@@ -547,7 +590,7 @@ class HeritagePlatform:
 
     # ----------------------------------------------------------------------- #
 
-    def sandhi(self, word_1, word_2, mode="internal"):
+    def sandhi(self, word_1: str, word_2: str, mode: str = "internal"):
         """
         Join two words by forming a Sandhi
 
@@ -587,7 +630,7 @@ class HeritagePlatform:
 
     # ----------------------------------------------------------------------- #
 
-    def search_inflected_form(self, word, category):
+    def search_inflected_form(self, word: str, category: str):
         """
         Search an inflected form
 
@@ -691,7 +734,7 @@ class HeritagePlatform:
     ###########################################################################
 
     @functools.lru_cache(maxsize=None)
-    def get_lexicon_entry(self, file_name, word_id):
+    def get_lexicon_entry(self, file_name: str, word_id: str):
         if self.method == "shell":
             path = self.get_path("dictionary")
             file_path = os.path.join(path, file_name)
@@ -711,7 +754,7 @@ class HeritagePlatform:
     ###########################################################################
     # Fetch Result through Web or Shell
 
-    def get_result_from_web(self, url, options, attempts=3):
+    def get_result_from_web(self, url: str, options: dict, attempts: int = 3):
         """
         Get results from the Heritage Platform web mirror
         Exponential backoff is used in case there are network errors
@@ -738,7 +781,7 @@ class HeritagePlatform:
         return self.__get(query_url, attempts=attempts)
 
     @functools.lru_cache(maxsize=None)
-    def __get(self, query_url, attempts=3):
+    def __get(self, query_url: str, attempts: int = 3):
         """
         Query web with exponential-backoff
 
@@ -780,7 +823,9 @@ class HeritagePlatform:
 
     # ----------------------------------------------------------------------- #
 
-    def get_result_from_shell(self, path, options, timeout=30):
+    def get_result_from_shell(
+        self, path: str, options: dict, timeout: int = 30
+    ):
         """
         Get results from the Heritage Platform's local installation via shell
 
@@ -805,7 +850,7 @@ class HeritagePlatform:
         return self.__run(path, environment, timeout=timeout)
 
     @functools.lru_cache(maxsize=None)
-    def __run(self, path, environment, timeout=30):
+    def __run(self, path, environment: dict, timeout: int = 30):
         """
         Get results from shell through a subprocess call
 
@@ -839,7 +884,7 @@ class HeritagePlatform:
 
     # ----------------------------------------------------------------------- #
 
-    def get_result(self, action, options, *args, **kwargs):
+    def get_result(self, action: str, options: dict, *args, **kwargs):
         """
         High-level function to obtain result for various actions
 
@@ -874,7 +919,7 @@ class HeritagePlatform:
         """Get the current method"""
         return self.method
 
-    def set_method(self, method):
+    def set_method(self, method: str):
         """
         Set method for fetching the output
 
@@ -885,19 +930,19 @@ class HeritagePlatform:
             return True
         self.logger.warning(f"Invalid method: '{method}'")
         if self.method is None:
-            self.method = "shell"
+            self.method = self.DEFAULT_METHOD
         return False
 
     # ----------------------------------------------------------------------- #
 
-    def get_option(self, opt_name):
+    def get_option(self, opt_name: str):
         """Get the value of global options"""
         if opt_name not in self.OPTIONS:
-            self.logger.warning("Invalid option: '{opt_name}'")
+            self.logger.warning(f"Invalid option: '{opt_name}'")
             return None
         return self.options.get(opt_name, None)
 
-    def set_option(self, opt_name, opt_value):
+    def set_option(self, opt_name: str, opt_value: str):
         """Set global options
 
         Any of these options, if expected by a particular utility from the
@@ -933,7 +978,7 @@ class HeritagePlatform:
         """Get current font for Sanskrit Output"""
         return self.get_option("font")
 
-    def set_font(self, font):
+    def set_font(self, font: str):
         """Set font for Sanskrit output"""
         return self.set_option("font", font.lower())
 
@@ -943,18 +988,18 @@ class HeritagePlatform:
         """Get current lexicon"""
         return self.get_option("lex")
 
-    def set_lexicon(self, lexicon):
+    def set_lexicon(self, lexicon: str):
         """Set lexicon"""
         return self.set_option("lex", lexicon.upper())
 
     ###########################################################################
     # URL or Path Builders
 
-    def get_url(self, action):
+    def get_url(self, action: str):
         """URL Builder"""
         return urllib.parse.urljoin(self.base_url, self.ACTIONS[action]["web"])
 
-    def get_path(self, action):
+    def get_path(self, action: str):
         """Path Builder"""
         return os.path.join(self.scripts_dir, self.ACTIONS[action]["shell"])
 
@@ -979,8 +1024,10 @@ class HeritagePlatform:
         return f"{self.__class__.__name__}({repr_params})"
 
     ###########################################################################
+    # TODO: Move these to utils.py ??
 
-    def prepare_input(self, input_text):
+    @staticmethod
+    def prepare_input(input_text: str):
         """
         Prepare Input
             * Convert Devanagari to Velthuis
@@ -989,7 +1036,7 @@ class HeritagePlatform:
         return "+".join(devanagari_to_velthuis(input_text).split())
 
     @staticmethod
-    def identify_gender(gender):
+    def identify_gender(gender: str):
         genders = {
             "Mas": ["पु", "m"],
             "Fem": ["स्त्री", "f"],
