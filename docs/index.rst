@@ -1,5 +1,5 @@
 Welcome to Heritage.py's documentation!
-======================================
+=======================================
 
 .. image:: https://img.shields.io/pypi/v/heritage
         :target: https://pypi.python.org/pypi/heritage

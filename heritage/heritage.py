@@ -4,13 +4,14 @@
 Python Interface to The Sanskrit Heritage Site
 
 Use The Sanskrit Heritage Platform using,
+
 * Web mirror
-    - no installation required
-    - makes HTTP requests
+  - no installation required
+  - makes HTTP requests
 * Local installation
-    - faster
-    - uses console
-    - no HTTP requests required
+  - faster
+  - uses console
+  - no HTTP requests required
 
 Using Local Installation
 ------------------------
@@ -698,8 +699,7 @@ class HeritagePlatform:
     # ----------------------------------------------------------------------- #
 
     def search_lexicon(self, word: str, lexicon: str = None):
-        """
-        Search a word in the dictionary
+        """Search a word in the dictionary
 
         Parameters
         ----------
@@ -708,8 +708,10 @@ class HeritagePlatform:
         lexicon : str, optional
             Lexicon to search the word in.
             Possible values are,
-                * MW: Monier-Williams Dictionary
-                * SH: Heritage Dictionary
+
+              - MW: Monier-Williams Dictionary
+              - SH: Heritage Dictionary
+
             The default is 'MW'.
 
         Returns
