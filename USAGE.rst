@@ -23,3 +23,109 @@ To use Heritage.py in a project,
 .. code-block:: python
 
     import heritage
+
+Detailed examples
+=================
+
+The :class:`heritage.heritage.HeritagePlatform` class is the main entry point.
+It understands both the HTTP interface exposed by sanskrit.inria.fr and the
+local binaries provided by the upstream project.
+
+Create a client
+---------------
+
+.. code-block:: python
+
+    import os
+    from heritage import HeritagePlatform
+
+    # Default behaviour: talks to the INRIA mirror
+    web_platform = HeritagePlatform(method="web")
+
+    # Use a local checkout for offline operation
+    shell_platform = HeritagePlatform(
+        base_dir=os.path.expanduser("~/git/Heritage_Platform"),
+        method="shell",
+    )
+
+If the executable scripts are missing under ``<base_dir>/ML``, shell mode is
+automatically downgraded to web mode and a warning is logged.
+
+Morphological analysis
+----------------------
+
+``get_analysis`` returns every solution offered by the Reader Companion for a
+piece of Sanskrit input. Each solution contains the original word text and one
+or more possible analyses.
+
+.. code-block:: python
+
+    analyses = web_platform.get_analysis("रामः वनं गच्छति", sentence=True)
+    first_solution = analyses[1]
+    first_word = first_solution["words"][0][0]
+
+    assert first_word["root"] == "राम"
+    assert first_word["analyses"][0] == ['pr', 'mas', 'sg', 'nom']
+
+Dependency Roles
+----------------
+
+To obtain semantic roles from the Reader Assistant:
+
+.. code-block:: python
+
+    roles = web_platform.get_parse("रामः वनं गच्छति", solution_id=1)
+    for role in roles:
+        print(role["text"], role["roles"])
+
+Tables
+------
+
+Declensions and conjugations are available through the Grammarian utilities.
+
+.. code-block:: python
+
+    declensions = web_platform.get_declensions("राम", gender="m")
+    heritage.set_font("roma")  # request IAST output instead of Devanagari
+
+    conjugations = web_platform.get_conjugations("भू", gana="bhwaadi")
+    # TODO: Parse the HTML tables in conjugations.extract_conjugations()
+
+Advanced helpers
+----------------
+
+* ``heritage.utils.devanagari_to_velthuis`` -- convert input to Velthuis.
+* ``heritage.utils.build_query_string`` -- produce QUERY_STRING values when
+  calling the CGI scripts manually.
+* ``HeritagePlatform.set_lexicon`` -- toggle between Monier-Williams (``MW``)
+  and the Heritage dictionary (``SH``).
+
+HTTP retries and timeouts
+-------------------------
+
+Web mode automatically retries transient failures and decodes responses using
+UTF-8. You can tune the behaviour when constructing the platform:
+
+.. code-block:: python
+
+    heritage = HeritagePlatform(
+        method="web",
+        request_timeout=5,    # seconds per attempt
+        request_attempts=4,   # exponential-backoff retries
+    )
+
+This configuration is respected by every helper that issues HTTP requests and
+is also used when fetching dictionary entries.
+
+Troubleshooting
+---------------
+
+* Enable logging::
+
+.. code-block:: python
+
+    import logging
+    logging.basicConfig(level=logging.INFO)
+
+* Intermittent HTTP errors trigger exponential backoff and retries.
+* Shell mode uses a timeout; long-running executables raise ``TimeoutError``.

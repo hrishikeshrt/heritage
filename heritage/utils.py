@@ -4,10 +4,19 @@
 
 ###############################################################################
 
+from urllib.parse import urlencode
+
 
 def build_query_string(options: dict) -> str:
-    """Build QUERY_STRING"""
-    return "&".join([f"{k}={v}" for k, v in options.items()])
+    """
+    Build a CGI-compatible ``QUERY_STRING``.
+
+    Values set to ``None`` are dropped and literal ``+`` characters are kept
+    intact because the Heritage CGI scripts rely on plus-separated tokens for
+    multi-word inputs.
+    """
+    filtered = {k: v for k, v in options.items() if v is not None}
+    return urlencode(filtered, doseq=True, safe="+")
 
 
 ###############################################################################

@@ -44,6 +44,22 @@ import bs4
 from .constants import HERITAGE_COLOURS
 from .utils import build_query_string, devanagari_to_velthuis
 
+
+###############################################################################
+
+logging.basicConfig(
+    format='[%(asctime)s] %(name)s %(levelname)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    level=logging.INFO,
+    handlers=[logging.StreamHandler()]
+)
+
+###############################################################################
+
+DEFAULT_REQUEST_TIMEOUT = 10
+DEFAULT_REQUEST_ATTEMPTS = 3
+_LATIN_FALLBACK_ENCODINGS = {"iso-8859-1", "latin1", "latin-1"}
+
 ###############################################################################
 # TODO: Do we need to use python-frozendict (PyPI)?
 
@@ -326,6 +342,7 @@ class HeritageOutput:
         pattern = r"\[(.*?)\]\{([^\}]*)\}"
         rows = table.find_all("tr")
         analyses = []
+        logger = logging.getLogger(__name__)
         for row in rows:
             analysis = {}
             if row is None:
@@ -338,8 +355,11 @@ class HeritageOutput:
                 file_name, word_id = link_parts[0], link_parts[1]
             else:
                 file_name, word_id = None, None
-
-            match = re.match(pattern, row.get_text().strip(), flags=re.DOTALL)
+            row_text = row.get_text().strip()
+            match = re.match(pattern, row_text, flags=re.DOTALL)
+            if match is None:
+                logger.debug("Unable to parse analysis row: %s", row_text)
+                continue
             analysis["lexicon"] = (file_name, word_id)
             analysis["root"] = match.group(1).split()[0].strip()
             analysis["analyses"] = [
@@ -428,17 +448,31 @@ class HeritagePlatform:
 
             Possible values are, 'shell' and 'web'
             The default is 'shell'.
+        **kwargs :
+            Additional configuration keywords. Supported values are:
+
+            * ``request_timeout`` (int): timeout for HTTP requests in seconds.
+            * ``request_attempts`` (int): number of HTTP retries before giving up.
         """
         self.logger = logging.getLogger(__name__)
         self.base_url = self.INRIA_URL if base_url is None else base_url
         self.base_dir = base_dir
         self.scripts_dir = os.path.join(self.base_dir, "ML")
+        self.request_timeout = kwargs.pop(
+            "request_timeout", DEFAULT_REQUEST_TIMEOUT
+        )
+        self.request_attempts = kwargs.pop(
+            "request_attempts", DEFAULT_REQUEST_ATTEMPTS
+        )
 
         self.method = None
         self.set_method(method)
 
         if not self.valid_installation():
-            self.logger.warning("Heritage Platform installation not found.")
+            self.logger.warning(
+                "Heritage Platform installation not found. "
+                "Falling back to `method=\"web\"`."
+            )
             self.base_dir = ""
             self.scripts_dir = ""
             self.set_method("web")
@@ -583,6 +617,8 @@ class HeritagePlatform:
         solution = solutions[solution_id]
         options = solution["parser_options"]
         result = self.get_result("parser", options)
+        if result is None:
+            return None
         output = HeritageOutput(result)
         roles = output.extract_parse()
         solution["roles"] = roles
@@ -625,6 +661,8 @@ class HeritagePlatform:
             "font": self.get_font(),
         }
         result = self.get_result("sandhi", options)
+        if result is None:
+            return None
         output = HeritageOutput(result)
 
         return output.extract_sandhi()
@@ -658,6 +696,8 @@ class HeritagePlatform:
             "font": self.get_font(),
         }
         result = self.get_result("lemma", options)
+        if result is None:
+            return None
         output = HeritageOutput(result)
 
         # TODO: Output Parsing
@@ -676,6 +716,8 @@ class HeritagePlatform:
             "font": self.get_font(),
         }
         result = self.get_result("declension", options)
+        if result is None:
+            return None
         output = HeritageOutput(result)
 
         return output.extract_declensions(headers=headers)
@@ -691,6 +733,8 @@ class HeritagePlatform:
             "font": self.get_font(),
         }
         result = self.get_result("conjugation", options)
+        if result is None:
+            return None
         output = HeritageOutput(result)
 
         # TODO: Output Parsing
@@ -726,6 +770,8 @@ class HeritagePlatform:
             "font": self.get_font(),
         }
         result = self.get_result("search", options)
+        if result is None:
+            return None
         output = HeritageOutput(result)
 
         # TODO: Output Parsing
@@ -745,10 +791,15 @@ class HeritagePlatform:
         elif self.method == "web":
             url = self.get_url("dictionary")
             query_url = f"{url}{file_name}#{word_id}"
-            content = self.__get(query_url)
+            content = self.__get(
+                query_url, self.request_attempts, self.request_timeout
+            )
         else:
             self.logger.error(f"Invalid method: '{self.method}'.")
             return
+
+        if content is None:
+            return None
 
         output = HeritageOutput(content)
         return output.extract_lexicon_entry()
@@ -756,7 +807,13 @@ class HeritagePlatform:
     ###########################################################################
     # Fetch Result through Web or Shell
 
-    def get_result_from_web(self, url: str, options: dict, attempts: int = 3):
+    def get_result_from_web(
+        self,
+        url: str,
+        options: dict,
+        attempts: int = None,
+        timeout: int = None,
+    ):
         """
         Get results from the Heritage Platform web mirror
         Exponential backoff is used in case there are network errors
@@ -770,20 +827,25 @@ class HeritagePlatform:
             Dictionary containing valid options for the script
         attempts : int, optional
             Number of attempts for the exponential backoff
-            The default is 3.
+            The default is `self.request_attempts`.
+        timeout : int, optional
+            Timeout for the HTTP request in seconds.
+            The default is `self.request_timeout`.
 
         Returns
         -------
         str
-            Result (HTML) obtained
+            Result (HTML) obtained. Returns ``None`` when every attempt fails.
         """
 
+        attempts = attempts or self.request_attempts
+        timeout = timeout or self.request_timeout
         query_string = build_query_string(options)
         query_url = f"{url}?{query_string}"
-        return self.__get(query_url, attempts=attempts)
+        return self.__get(query_url, attempts, timeout)
 
     @functools.lru_cache(maxsize=None)
-    def __get(self, query_url: str, attempts: int = 3):
+    def __get(self, query_url: str, attempts: int, timeout: int):
         """
         Query web with exponential-backoff
 
@@ -793,35 +855,83 @@ class HeritagePlatform:
             URL to query
         attempts : int, optional
             Number of attempts for the exponential backoff
-            The default is 3.
+        timeout : int, optional
+            Timeout for the HTTP request in seconds.
 
         Returns
         -------
         str
             Result (HTML) obtained
         """
-        # query with exponential-backoff
-        r = requests.get(query_url)
-        if r.status_code != 200:
-            for n in range(attempts):
-                if n == 0:
-                    self.logger.warning(f"URL: {query_url}")
+        return self._query_with_backoff(query_url, attempts, timeout)
 
-                self.logger.warning(f"Status Code: {r.status_code} (n = {n})")
+    def _query_with_backoff(
+        self, query_url: str, attempts: int, timeout: int
+    ):
+        """
+        Fetch a URL with exponential backoff and robust decoding.
 
-                fn = n
-                backoff = (2 ** fn) + random.random()
-                time.sleep(backoff)
-                r = requests.get(query_url)
+        Returns decoded response text on success, otherwise ``None``.
+        """
+        attempts = max(1, attempts)
+        last_error = None
+        response = None
 
-                if r.status_code == 200:
-                    self.logger.info(f"Resolved! (n = {n})")
-                    break
-            else:
+        for attempt in range(attempts):
+            try:
+                response = requests.get(query_url, timeout=timeout)
+            except requests.RequestException as exc:
+                last_error = exc
                 self.logger.warning(
-                    f"Failed on '{query_url}' after {n} attempts."
+                    "Attempt %s/%s failed for %s: %s",
+                    attempt + 1,
+                    attempts,
+                    query_url,
+                    exc,
                 )
-        return r.text
+            else:
+                if response.status_code == requests.codes.ok:
+                    return self._response_text(response)
+
+                self.logger.warning(
+                    "Status code %s on attempt %s/%s for %s",
+                    response.status_code,
+                    attempt + 1,
+                    attempts,
+                    query_url,
+                )
+
+            if attempt < attempts - 1:
+                backoff = (2 ** attempt) + random.random()
+                time.sleep(backoff)
+
+        if last_error is not None:
+            self.logger.error(
+                "Unable to fetch %s after %s attempts due to network errors.",
+                query_url,
+                attempts,
+                exc_info=last_error,
+            )
+        elif response is not None:
+            self.logger.error(
+                "Unable to fetch %s after %s attempts. Last status: %s",
+                query_url,
+                attempts,
+                response.status_code,
+            )
+        return None
+
+    @staticmethod
+    def _response_text(response: requests.Response) -> str:
+        """Return response body decoded as UTF-8, avoiding mojibake."""
+        encoding = response.encoding
+        if not encoding or encoding.lower() in _LATIN_FALLBACK_ENCODINGS:
+            encoding = response.apparent_encoding or "utf-8"
+
+        try:
+            return response.content.decode(encoding or "utf-8")
+        except UnicodeDecodeError:
+            return response.content.decode("utf-8", errors="replace")
 
     # ----------------------------------------------------------------------- #
 
