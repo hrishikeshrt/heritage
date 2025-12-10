@@ -36,6 +36,14 @@ heritage.utils module
    :undoc-members:
    :show-inheritance:
 
+heritage.models module
+----------------------
+
+.. automodule:: heritage.models
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Module contents
 ---------------
 

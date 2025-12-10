@@ -89,7 +89,6 @@ Declensions and conjugations are available through the Grammarian utilities.
     heritage.set_font("roma")  # request IAST output instead of Devanagari
 
     conjugations = web_platform.get_conjugations("भू", gana="bhwaadi")
-    # TODO: Parse the HTML tables in conjugations.extract_conjugations()
 
 Advanced helpers
 ----------------
@@ -99,6 +98,16 @@ Advanced helpers
   calling the CGI scripts manually.
 * ``HeritagePlatform.set_lexicon`` -- toggle between Monier-Williams (``MW``)
   and the Heritage dictionary (``SH``).
+
+Structured results
+------------------
+
+All high-level helpers return dataclasses defined in :mod:`heritage.models`
+when ``structured=True`` (the default). For example,
+:class:`heritage.models.SolutionAnalysis` groups every
+:class:`heritage.models.WordAnalysis` and keeps the original parser options so
+you can revisit a solution later. Convert dataclasses to plain dictionaries via
+``dataclasses.asdict`` or the ``heritage.cli`` helpers.
 
 HTTP retries and timeouts
 -------------------------
@@ -117,15 +126,33 @@ UTF-8. You can tune the behaviour when constructing the platform:
 This configuration is respected by every helper that issues HTTP requests and
 is also used when fetching dictionary entries.
 
+Command line interface
+----------------------
+
+The ``heritage`` CLI exposes the same capabilities for quick experimentation:
+
+.. code-block:: console
+
+    $ heritage conjugation गम् --gana bhwaadi
+    लट्
+      परस्मैपदम्
+        प्रथमपुरुषः	गच्छति
+        ...
+
+Pass ``--json`` to get machine-readable output or ``--method shell`` to target a
+local installation.
+
 Troubleshooting
 ---------------
 
 * Enable logging::
 
-.. code-block:: python
+  .. code-block:: python
 
-    import logging
-    logging.basicConfig(level=logging.INFO)
+      import logging
+      logging.basicConfig(level=logging.INFO)
 
 * Intermittent HTTP errors trigger exponential backoff and retries.
-* Shell mode uses a timeout; long-running executables raise ``TimeoutError``.
+* Shell mode uses a timeout; long-running executables log an error and return
+  ``None`` instead of raw HTML when the underlying CGI scripts do not respond
+  in time.

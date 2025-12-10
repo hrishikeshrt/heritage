@@ -13,3 +13,18 @@ __created_on__ = "Fri Jan  1 11:18:04 2021"
 
 from .heritage import HeritagePlatform, HeritageOutput  # noqa
 from .constants import HERITAGE_LANG, HERITAGE_COLOURS  # noqa
+from .models import (  # noqa
+    AnalysisCandidate,
+    ConjugationCell,
+    ConjugationTable,
+    DeclensionTable,
+    DictionaryEntry,
+    Font,
+    Lexicon,
+    Method,
+    SandhiMode,
+    SearchResult,
+    SolutionAnalysis,
+    WordAnalysis,
+    WordRole,
+)

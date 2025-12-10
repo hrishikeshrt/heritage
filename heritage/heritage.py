@@ -31,28 +31,32 @@ import os
 import re
 import time
 import random
-import signal
 import logging
 import functools
 import subprocess
 import urllib.parse
 from dataclasses import dataclass, field
+from typing import Dict, Optional
 
 import requests
 import bs4
 
 from .constants import HERITAGE_COLOURS
+from .models import (
+    AnalysisCandidate,
+    ConjugationCell,
+    ConjugationTable,
+    DeclensionTable,
+    DictionaryEntry,
+    SearchResult,
+    SolutionAnalysis,
+    WordAnalysis,
+    WordRole,
+)
 from .utils import build_query_string, devanagari_to_velthuis
 
 
 ###############################################################################
-
-logging.basicConfig(
-    format='[%(asctime)s] %(name)s %(levelname)s: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-    level=logging.INFO,
-    handlers=[logging.StreamHandler()]
-)
 
 ###############################################################################
 
@@ -97,22 +101,6 @@ def freezeargs(func):
 ###############################################################################
 
 
-def timeout_handler(signum, frame):
-    raise TimeoutError("Time limit exceeded.")
-
-
-if hasattr(signal, "SIGALRM"):
-    signal.signal(signal.SIGALRM, timeout_handler)
-    alarm = signal.alarm
-else:
-
-    def alarm(x):
-        return x
-
-
-###############################################################################
-
-
 @dataclass
 class HeritageAnalysis:
     case: str = field(default=None)
@@ -152,6 +140,14 @@ class HeritageOutput:
             self.soup = bs4.BeautifulSoup(html, "html.parser")
 
         self.body = self.soup.find("body")
+        if self.body is None:
+            self.logger.error("No <body> tag found in HTML.")
+            self.footer = None
+            self.title = self.soup.find("title")
+            self.inner_title = None
+            self.blocks = []
+            return
+
         self.footer = self.body.find("div", class_=self.CLASSES["footer"])
 
         # Extract Meta Information
@@ -169,7 +165,9 @@ class HeritageOutput:
         # Find Relevant Body Children
         self.blocks = self.body.find_all()
 
-    def extract_analysis(self, meta: bool = False):
+    def extract_analysis(
+        self, meta: bool = False, structured: bool = False
+    ):
         """
         Extract analysis from HTML
 
@@ -178,7 +176,13 @@ class HeritageOutput:
         meta : bool
             If True, include meta information, i.e, parse options, classes
             The default is False.
+        structured : bool
+            If True, return dataclass-based representations.
+            The default is False (legacy dictionaries).
         """
+        if not self.title or not self.title.text:
+            self.logger.error("Missing or empty <title> tag.")
+            return None
         if self.title.text != "Sanskrit Reader Companion":
             self.logger.error("Invalid output page.")
             return None
@@ -216,35 +220,72 @@ class HeritageOutput:
                 solution["parser_options"] = parser_options
 
             tables = soup.find_all("table")
+            current_text = None
             for table in tables:
                 if table.find("table"):
-                    word = {}
-                    word["text"] = table.previous_sibling.get_text()
+                    prev = table.previous_sibling
+                    current_text = (
+                        prev.get_text()
+                        if isinstance(prev, bs4.element.Tag)
+                        else str(prev).strip()
+                    )
                 else:
                     # Inner table contains analysis and it occurs after
                     # the original word
-                    self.logger.debug(table.get_text())
-                    analyses = self.parse_analysis(table)
-                    self.logger.debug(analyses)
+                    analyses = self.parse_analysis(
+                        table, structured=structured
+                    )
                     css_classes = table.get("class", [])
                     if meta:
-                        word["classes"] = css_classes
-                    word["category"] = [
+                        word_classes = css_classes
+                    categories = [
                         HERITAGE_COLOURS.get(css_class.split("_back")[0], None)
                         for css_class in css_classes
                     ]
-                    word_analyses = []
-                    for analysis in analyses:
-                        word_copy = word.copy()
-                        word_copy.update(analysis)
-                        word_analyses.append(word_copy)
-                    solution["words"].append(word_analyses)
+                    if structured:
+                        solution["words"].append(
+                            WordAnalysis(
+                                text=current_text or "",
+                                category=categories,
+                                classes=css_classes,
+                                candidates=analyses,
+                            )
+                        )
+                    else:
+                        word = {"text": current_text or ""}
+                        if meta:
+                            word["classes"] = word_classes
+                        word["category"] = categories
+                        word_analyses = []
+                        for analysis in analyses:
+                            word_copy = word.copy()
+                            word_copy.update(analysis)
+                            word_analyses.append(word_copy)
+                        solution["words"].append(word_analyses)
 
             solutions[solution_id] = solution
+
+        if structured:
+            structured_solutions: Dict[int, SolutionAnalysis] = {}
+            for solution_id, raw_solution in solutions.items():
+                parser_options = (
+                    raw_solution.get("parser_options")
+                    if meta
+                    else None
+                )
+                structured_solutions[solution_id] = SolutionAnalysis(
+                    id=solution_id,
+                    words=raw_solution["words"],
+                    parser_options=parser_options,
+                )
+            return structured_solutions
         return solutions
 
-    def extract_parse(self):
+    def extract_parse(self, structured: bool = False):
         """Extract parse from HTML"""
+        if not self.title or not self.title.text:
+            self.logger.error("Missing or empty <title> tag.")
+            return None
         if self.title.text != "Sanskrit Reader Assistant":
             self.logger.error("Invalid output page.")
             return None
@@ -260,15 +301,31 @@ class HeritageOutput:
             semantic_table = tables[3]
             semantic_rows = semantic_table.find_all("tr")
             word_roles = [row.get_text() for row in semantic_rows]
-            roles.append({"text": word_text, "roles": word_roles})
+            if structured:
+                roles.append(WordRole(text=word_text, roles=word_roles))
+            else:
+                roles.append({"text": word_text, "roles": word_roles})
         return roles
 
-    def extract_declensions(self, headers: bool = True):
-        """Extract declensions from HTML"""
+    def extract_declensions(
+        self, headers: bool = True, structured: bool = False
+    ):
+        """
+        Extract declension tables from HTML.
+
+        When ``structured`` is True, returns a :class:`DeclensionTable`
+        instance; otherwise returns a nested list of header/body cells.
+        """
+        if not self.title or not self.title.text:
+            self.logger.error("Missing or empty <title> tag.")
+            return None
         if self.title.text != "Sanskrit Grammarian Declension Engine":
             self.logger.error("Invalid output page.")
             return None
         table = self.soup.find("table", class_="inflexion")
+        if table is None:
+            self.logger.error("Declension table not found in HTML.")
+            return None
         rows = table.find_all("tr")
         output = []
         for row in rows:
@@ -277,20 +334,43 @@ class HeritageOutput:
         output = output[:2] + output[3:] + [output[2]]
         if not headers:
             output = [row[1:] for row in output[1:]]
+        if structured:
+            flattened = [
+                [" ".join(cell).strip() for cell in row] for row in output
+            ]
+            if headers:
+                return DeclensionTable(
+                    headers=flattened[0],
+                    rows=flattened[1:],
+                )
+            return DeclensionTable(headers=[], rows=flattened)
         return output
 
-    def extract_conjugations(self, headers: bool = True):
-        """Extract conjugations from HTML"""
+    def extract_conjugations(
+        self, headers: bool = True, structured: bool = False
+    ):
+        """
+        Extract conjugation tables from HTML.
+
+        When ``structured`` is True, returns a list of
+        :class:`ConjugationTable` objects; otherwise a nested dictionary
+        keyed by table headings.
+        """
+        if not self.title or not self.title.text:
+            self.logger.error("Missing or empty <title> tag.")
+            return None
         if self.title.text != "Sanskrit Grammarian Conjugation Engine":
             self.logger.error("Invalid output page.")
             return None
         tables = self.soup.find_all("table", class_="gris_cent")
-        forms = {}
+        forms = {} if not structured else []
         for table in tables:
             header = table.find("span").get_text()
-            forms[header] = {}
+            if not structured:
+                forms[header] = {}
             inner_tables = table.find_all("table", class_="inflexion")
 
+            structured_cells = []
             for inner_table in inner_tables:
                 rows = inner_table.find_all("tr")
                 output = []
@@ -299,12 +379,28 @@ class HeritageOutput:
                         col.get_text(" ").split() for col in row.find_all("th")
                     ]
                     output.append(cols)
-                forms[header][output[0][0][0]] = output
+                if structured:
+                    heading = " ".join(output[0][0]).strip()
+                    flattened_rows = [
+                        [" ".join(cell).strip() for cell in row]
+                        for row in (output[1:] if headers else output)
+                    ]
+                    structured_cells.append(
+                        ConjugationCell(heading=heading, rows=flattened_rows)
+                    )
+                else:
+                    forms[header][output[0][0][0]] = output
+
+            if structured:
+                forms.append(ConjugationTable(title=header, cells=structured_cells))
 
         return forms
 
     def extract_sandhi(self):
         """Extract Sandhi from HTML"""
+        if not self.title or not self.title.text:
+            self.logger.error("Missing or empty <title> tag.")
+            return None
         if self.title.text != "Sanskrit Sandhi Engine":
             self.logger.error("Invalid output page.")
             return None
@@ -316,15 +412,72 @@ class HeritageOutput:
 
     def extract_lexicon_entry(self, word_id: str):
         """Extract entry from a lexicon"""
+        if not self.title or not self.title.text:
+            self.logger.error("Missing or empty <title> tag.")
+            return None
         if "Monier-Williams Sanskrit-English" not in self.title.text:
             self.logger.error("Invalid dictionary page.")
             return None
         marker = self.soup.find("a", attrs={"name": word_id})
+        if marker is None:
+            self.logger.error(
+                "Dictionary entry with id '%s' not found.", word_id
+            )
+            return None
         parent = marker.find_parent()
-        # TODO: complete
+        container = marker.find_parent("span")
+        if container is None:
+            container = parent
+        lemma = marker.get_text(strip=True)
+        if not lemma:
+            italic = container.find("i")
+            lemma = italic.get_text(strip=True) if italic else word_id
+        entry_html = str(container)
+        entry_text = container.get_text(" ", strip=True)
+        return DictionaryEntry(lemma=lemma, html=entry_html, text=entry_text)
+
+    def extract_search_results(self, structured: bool = True):
+        """Extract dictionary search results."""
+        result_table = self.soup.find("table")
+        if result_table is None:
+            self.logger.error("Could not locate results table.")
+            return None
+        results = []
+        for row in result_table.find_all("tr"):
+            cols = row.find_all(["td", "th"])
+            if not cols:
+                continue
+            link_tag = cols[0].find("a")
+            entry = (
+                link_tag.get_text(strip=True)
+                if link_tag
+                else cols[0].get_text(strip=True)
+            )
+            if not entry:
+                continue
+            link = link_tag["href"] if link_tag else None
+            summary_parts = [
+                col.get_text(" ", strip=True) for col in cols[1:]
+            ]
+            summary = " ".join(part for part in summary_parts if part)
+            if structured:
+                results.append(
+                    SearchResult(entry=entry, link=link, summary=summary)
+                )
+            else:
+                results.append(
+                    {
+                        "entry": entry,
+                        "link": link,
+                        "summary": summary,
+                    }
+                )
+        return results
 
     @staticmethod
-    def parse_analysis(table: bs4.element.Tag):
+    def parse_analysis(
+        table: bs4.element.Tag, structured: bool = False
+    ):
         """
         Parse analysis of a single word
         Analysis Format is: [root]{analysis_1 | analysis_2 | ..}
@@ -344,9 +497,7 @@ class HeritageOutput:
         analyses = []
         logger = logging.getLogger(__name__)
         for row in rows:
-            analysis = {}
             if row is None:
-                analyses.append(analysis)
                 continue
 
             link = row.find("a")
@@ -360,13 +511,26 @@ class HeritageOutput:
             if match is None:
                 logger.debug("Unable to parse analysis row: %s", row_text)
                 continue
-            analysis["lexicon"] = (file_name, word_id)
-            analysis["root"] = match.group(1).split()[0].strip()
-            analysis["analyses"] = [
+            parsed_analyses = [
                 [abbrev.replace(".", "") for abbrev in an.split()]
                 for an in match.group(2).split("|")
             ]
-            analyses.append(analysis)
+            if structured:
+                analyses.append(
+                    AnalysisCandidate(
+                        root=match.group(1).split()[0].strip(),
+                        analyses=parsed_analyses,
+                        lexicon_reference=(file_name, word_id),
+                    )
+                )
+            else:
+                analyses.append(
+                    {
+                        "lexicon": (file_name, word_id),
+                        "root": match.group(1).split()[0].strip(),
+                        "analyses": parsed_analyses,
+                    }
+                )
         return analyses
 
     def __repr__(self):
@@ -490,6 +654,7 @@ class HeritagePlatform:
         sentence: bool = True,
         unsandhied: bool = False,
         meta: bool = False,
+        structured: bool = True,
     ):
         """
         Obtain morphological analyses using The Sanskrit Reader Companion
@@ -507,10 +672,13 @@ class HeritagePlatform:
         meta : bool, optional
             The option is passed to HeritageOutput.extract_analysis().
             The default is False.
+        structured : bool, optional
+            Return dataclass objects if True, otherwise legacy dictionaries.
+            The default is True.
 
         Returns
         -------
-        dict
+        dict[int, SolutionAnalysis] | dict
             Dictionary of valid morphological analyses with solution_id as keys
         """
 
@@ -542,7 +710,7 @@ class HeritagePlatform:
 
         output = HeritageOutput(result)
         # return output
-        return output.extract_analysis(meta=meta)
+        return output.extract_analysis(meta=meta, structured=structured)
 
     # ----------------------------------------------------------------------- #
 
@@ -575,11 +743,18 @@ class HeritagePlatform:
 
         Returns
         -------
-        dict
-            Parse of the sentence
+        SolutionAnalysis | dict
+            Parse of the sentence. By default a
+            :class:`heritage.models.SolutionAnalysis` instance is returned,
+            but legacy dictionary outputs are still supported when using the
+            non-structured APIs.
         """
         solutions = self.get_analysis(
-            input_text, sentence=sentence, unsandhied=unsandhied, meta=True
+            input_text,
+            sentence=sentence,
+            unsandhied=unsandhied,
+            meta=True,
+            structured=True,
         )
 
         # If solution ID not provided, use the first solution
@@ -615,14 +790,19 @@ class HeritagePlatform:
         # }
 
         solution = solutions[solution_id]
-        options = solution["parser_options"]
+        parser_options = solution.parser_options if isinstance(
+            solution, SolutionAnalysis
+        ) else solution["parser_options"]
+        options = dict(parser_options or {})
         result = self.get_result("parser", options)
         if result is None:
             return None
         output = HeritageOutput(result)
-        roles = output.extract_parse()
+        roles = output.extract_parse(structured=isinstance(solution, SolutionAnalysis))
+        if isinstance(solution, SolutionAnalysis):
+            solution.roles = roles
+            return solution
         solution["roles"] = roles
-
         return solution
 
     # ----------------------------------------------------------------------- #
@@ -706,8 +886,39 @@ class HeritagePlatform:
     # ----------------------------------------------------------------------- #
 
     def get_declensions(
-        self, word: str, gender: str, headers: bool = True, lexicon: str = None
+        self,
+        word: str,
+        gender: str,
+        headers: bool = True,
+        lexicon: str = None,
+        structured: bool = True,
     ):
+        """
+        Retrieve declension tables from the Grammarian.
+
+        Parameters
+        ----------
+        word : str
+            Input word in Devanagari.
+        gender : str
+            Gender hint. Accepted values include short forms (``m``, ``f``,
+            ``n``) and Sanskrit labels (e.g. ``पु``, ``स्त्री``).
+        headers : bool, optional
+            If ``True``, include header row information. The default is True.
+        lexicon : str, optional
+            Reserved for future use. Currently ignored.
+        structured : bool, optional
+            When ``True`` (the default), returns a
+            :class:`heritage.models.DeclensionTable` instance. When ``False``,
+            returns the raw nested list produced by
+            :meth:`HeritageOutput.extract_declensions`.
+
+        Returns
+        -------
+        DeclensionTable | list | None
+            Structured table, legacy list-of-lists, or ``None`` when no table
+            can be extracted.
+        """
         options = {
             "lex": self.get_lexicon(),
             "t": self.get_option("t"),
@@ -720,11 +931,43 @@ class HeritagePlatform:
             return None
         output = HeritageOutput(result)
 
-        return output.extract_declensions(headers=headers)
+        return output.extract_declensions(
+            headers=headers, structured=structured
+        )
 
     # ----------------------------------------------------------------------- #
 
-    def get_conjugations(self, word: str, gana: str, lexicon: str = None):
+    def get_conjugations(
+        self,
+        word: str,
+        gana: str,
+        lexicon: str = None,
+        headers: bool = True,
+        structured: bool = True,
+    ):
+        """
+        Retrieve conjugation paradigms from the Grammarian.
+
+        Parameters
+        ----------
+        word : str
+            Verbal root in Devanagari.
+        gana : str
+            Verbal class (gaṇa) identifier expected by the backend.
+        lexicon : str, optional
+            Reserved for future use. Currently ignored.
+        headers : bool, optional
+            If ``True``, treat the first row of each table as a heading.
+        structured : bool, optional
+            When ``True`` (the default), returns a list of
+            :class:`heritage.models.ConjugationTable` objects. When ``False``,
+            returns the legacy dictionary-of-tables output.
+
+        Returns
+        -------
+        list[ConjugationTable] | dict | None
+            Structured tables, legacy mapping, or ``None`` on failure.
+        """
         options = {
             "lex": self.get_lexicon(),
             "t": self.get_option("t"),
@@ -737,13 +980,16 @@ class HeritagePlatform:
             return None
         output = HeritageOutput(result)
 
-        # TODO: Output Parsing
-        return output
+        return output.extract_conjugations(
+            headers=headers, structured=structured
+        )
 
     # ----------------------------------------------------------------------- #
 
-    def search_lexicon(self, word: str, lexicon: str = None):
-        """Search a word in the dictionary
+    def search_lexicon(
+        self, word: str, lexicon: str = None, structured: bool = True
+    ):
+        """Search a word in the dictionary.
 
         Parameters
         ----------
@@ -760,8 +1006,10 @@ class HeritagePlatform:
 
         Returns
         -------
-        matches : list
-            List of matches.
+        list[SearchResult] | list[dict] | None
+            Parsed search results (the default), legacy dictionaries when
+            ``structured`` is False, or ``None`` when the backend response
+            cannot be parsed.
         """
         options = {
             "lex": self.get_lexicon(),
@@ -774,15 +1022,33 @@ class HeritagePlatform:
             return None
         output = HeritageOutput(result)
 
-        # TODO: Output Parsing
         # TODO: Currently not using the lexicon keyword argument
         # Is there any use for that argument? For this function?
-        return output
+        return output.extract_search_results(structured=structured)
 
     ###########################################################################
 
     @functools.lru_cache(maxsize=None)
     def get_lexicon_entry(self, file_name: str, word_id: str):
+        """
+        Fetch a single dictionary entry by its file and anchor identifier.
+
+        The implementation reuses the same HTML parser used for direct search
+        results and returns a :class:`heritage.models.DictionaryEntry`
+        instance.
+
+        Parameters
+        ----------
+        file_name : str
+            Name of the HTML file containing the entry.
+        word_id : str
+            Anchor identifier within the dictionary page.
+
+        Returns
+        -------
+        DictionaryEntry | None
+            Parsed entry when available, otherwise ``None``.
+        """
         if self.method == "shell":
             path = self.get_path("dictionary")
             file_path = os.path.join(path, file_name)
@@ -802,7 +1068,7 @@ class HeritagePlatform:
             return None
 
         output = HeritageOutput(content)
-        return output.extract_lexicon_entry()
+        return output.extract_lexicon_entry(word_id)
 
     ###########################################################################
     # Fetch Result through Web or Shell
@@ -958,7 +1224,9 @@ class HeritagePlatform:
             Result (HTML) obtained
         """
         query_string = build_query_string(options)
-        environment = frozendict({"QUERY_STRING": query_string})
+        env = os.environ.copy()
+        env["QUERY_STRING"] = query_string
+        environment = frozendict(env)
         return self.__run(path, environment, timeout=timeout)
 
     @functools.lru_cache(maxsize=None)
@@ -981,17 +1249,21 @@ class HeritagePlatform:
         result : str
             Result (HTML) obtained
         """
-        alarm(timeout)
         try:
             result_header = "Content-Type: text/html\n\n"
-            result = subprocess.check_output(path, env=environment).decode(
-                "utf-8"
-            )
+            result = subprocess.check_output(
+                path, env=environment, timeout=timeout
+            ).decode("utf-8")
             result = result[len(result_header) :]
-        except TimeoutError:
-            self.logger.error("TimeoutError")
+        except subprocess.TimeoutExpired:
+            self.logger.error("Timeout while executing '%s'.", path)
             return None
-        alarm(0)
+        except subprocess.SubprocessError as exc:
+            self.logger.error("Subprocess error while executing '%s': %s", path, exc)
+            return None
+        except OSError as exc:
+            self.logger.error("OS error while executing '%s': %s", path, exc)
+            return None
         return result
 
     # ----------------------------------------------------------------------- #

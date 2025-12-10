@@ -132,16 +132,37 @@ Core API at a glance
     Retrieve declension tables from the Grammarian.
 
 ``HeritagePlatform.get_conjugations(word, gana, lexicon=None)``
-    Request conjugation tables (parsing into structured data is planned).
+    Request conjugation tables as structured dataclasses.
 
 ``HeritagePlatform.search_lexicon(word, lexicon=None)``
-    Query the dictionary interface (returns raw HTML for now).
+    Query the dictionary interface and receive parsed search results.
 
 ``heritage.utils.devanagari_to_velthuis(text)``
     Convert Devanagari script to the Velthuis scheme expected upstream.
 
 ``heritage.utils.build_query_string(options)``
     Assemble query strings for direct Heritage CGI calls.
+
+Command line interface
+======================
+
+Install the package and invoke the CLI to explore the platform without writing
+code:
+
+.. code-block:: console
+
+   $ heritage analysis "रामः वनं गच्छति"
+   Solution 1
+     रामः
+       - राम: pr mas sg nom
+     वनं
+       - वन: n sg acc
+     गच्छति
+       - गच्छ्: prs atl 3 sg parasmai
+
+Subcommands expose declensions, conjugations, sandhi helpers, and lexicon search.
+Add ``--json`` to any command to emit structured JSON based on the same
+dataclasses used by the Python API.
 
 Network configuration
 =====================
@@ -173,8 +194,8 @@ Troubleshooting
   installation is missing.
 * Network calls use retries with exponential backoff; expect short delays on
   transient failures.
-* The CLI entry point currently prints a placeholder message. Contributions to
-  build a feature-rich CLI are welcome.
+* The ``heritage`` CLI mirrors the Python API; run ``heritage --help`` to
+  inspect available subcommands and options.
 
 Credits
 =======
