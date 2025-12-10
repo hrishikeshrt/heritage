@@ -9,45 +9,45 @@ heritage.cli module
 
 .. automodule:: heritage.cli
    :members:
-   :undoc-members:
    :show-inheritance:
+   :undoc-members:
 
 heritage.constants module
 -------------------------
 
 .. automodule:: heritage.constants
    :members:
-   :undoc-members:
    :show-inheritance:
+   :undoc-members:
 
 heritage.heritage module
 ------------------------
 
 .. automodule:: heritage.heritage
    :members:
-   :undoc-members:
    :show-inheritance:
-
-heritage.utils module
----------------------
-
-.. automodule:: heritage.utils
-   :members:
    :undoc-members:
-   :show-inheritance:
 
 heritage.models module
 ----------------------
 
 .. automodule:: heritage.models
    :members:
-   :undoc-members:
    :show-inheritance:
+   :undoc-members:
+
+heritage.utils module
+---------------------
+
+.. automodule:: heritage.utils
+   :members:
+   :show-inheritance:
+   :undoc-members:
 
 Module contents
 ---------------
 
 .. automodule:: heritage
    :members:
-   :undoc-members:
    :show-inheritance:
+   :undoc-members:
