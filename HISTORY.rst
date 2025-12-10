@@ -11,7 +11,7 @@ History
   package.
 * Replace the placeholder console script with a real `heritage` CLI that
   exposes analysis, parse, declension, conjugation, sandhi, and search
-  subcommands, supports `--json`, and adds `--quiet`/`--verbose` flags.
+  subcommands, supports `--json`, and adds `--quiet` / `--verbose` flags.
 * Improve HTTP handling with configurable timeouts and retry counts, an
   exponential-backoff strategy, and more robust response decoding.
 * Refine shell mode by preserving the ambient environment, using subprocess
